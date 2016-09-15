@@ -28,21 +28,21 @@ with tf.device('/gpu:0'):
 	def conv2d(x, W):                                                                   
 		return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')            
 	with tf.variable_scope("layer1") as scope:                                                                       
-		W_conv1 = tf.Variable(tf.truncated_normal([1, 1, 1, 256]), name="conv1w")
+		W_conv1 = tf.Variable(tf.truncated_normal([1, 1, 1, 512]), name="conv1w")
 		# tf.histogram_summary("layer1_w", W_conv1)
-		b_conv1 = tf.Variable(tf.zeros([256]), name="conv1b")                                            
-		h_conv1 = tf.nn.sigmoid(conv2d(x_bw, W_conv1) + b_conv1, name="conv1")                            
+		b_conv1 = tf.Variable(tf.zeros([512]), name="conv1b")                                            
+		h_conv1 = tf.nn.relu(conv2d(x_bw, W_conv1) + b_conv1, name="conv1")                            
 	with tf.variable_scope("layer2") as scope:                                                                       
-		W_conv2 = tf.Variable(tf.truncated_normal([1, 1, 256, 128]), name="conv2w")                                  
+		W_conv2 = tf.Variable(tf.truncated_normal([1, 1, 512, 128]), name="conv2w")                                  
 		# tf.histogram_summary("layer2_w", W_conv2)                                   
 		b_conv2 = tf.Variable(tf.zeros([128]), name="conv2b")                                            
-		h_conv2 = tf.nn.sigmoid(conv2d(h_conv1, W_conv2) + b_conv2, name="conv2")                         
+		h_conv2 = tf.nn.relu(conv2d(h_conv1, W_conv2) + b_conv2, name="conv2")                         
 
 	with tf.variable_scope("layer3") as scope:                                                                       
 		W_conv3 = tf.Variable(tf.truncated_normal([1, 1, 128, 2]), name="conv3w")                                  
 		# tf.histogram_summary("layer2_w", W_conv2)                                   
 		b_conv3 = tf.Variable(tf.zeros([2]), name="conv2b")                                            
-		h_conv3 = tf.nn.sigmoid(conv2d(h_conv2, W_conv3) + b_conv3, name="conv3")*255 - 255/2                    
+		h_conv3 = tf.nn.tanh(conv2d(h_conv2, W_conv3) + b_conv3, name="conv3")                
 
 	# tt = tf.concat(3,tf.split(3,2,h_pool2))
 
@@ -54,6 +54,7 @@ with tf.device('/gpu:0'):
 	# y_uv = tf.reshape(h_pool2, [-1, 256, 256, 2])
 	# y_uv = tf.depth_to_space(h_pool2, 4)
 	y_uv = h_conv3
+	# y_uv = tf.clip_by_value(y_uv, -255 , 255)
 
 	# with tf.variable_scope("layer3") as scope:                                                                       
 	# 	W_conv3 = tf.Variable(tf.truncated_normal([5, 5, 32, 2]),name="conv3")
@@ -70,11 +71,11 @@ with tf.device('/gpu:0'):
 
 	y = x_uv
 	y_h = y_uv
-	# y_h = tf.clip_by_value(y_h, 1e-10 , 0.99999)
+	# y_h = tf.clip_by_value(y_h, -255 , 255)
 
-	y_orig = tf.concat(3, [x_bw, y])
+	y_orig_uv = tf.concat(3, [x_bw, y])
 
-	y_i, u, v =  tf.split(3,3,y_orig)
+	y_i, u, v =  tf.split(3,3,y_orig_uv)
 
 	r = y_i + 1.140*v
 	g = y_i - 0.395*u - 0.581*v
@@ -86,24 +87,49 @@ with tf.device('/gpu:0'):
 
 	y_orig = tf.concat(3, [r, g, b])
 
-	y_h_orig = tf.concat(3, [x_bw, y_h])
+	y_h_orig_uv = tf.concat(3, [x_bw, y_h])
 
-	y_i, u, v =  tf.split(3,3,y_h_orig)
+	y_i, u, v =  tf.split(3,3,y_h_orig_uv)
 	r = y_i + 1.140*v
 	g = y_i - 0.395*u - 0.581*v
 	b = y_i + 2.032*u
 
 	y_h_orig = tf.concat(3, [r, g, b])
 
-	y = y*255
-	y_h = y_h*255
+	# y = y*255
+	# y_h = y_h*255
 
 	# y_h = y_orig
 	# y = x_raw
 
+
+	def gkern(kernlen=21, nsig=3):
+		"""Returns a 2D Gaussian kernel array."""
+		import numpy as np
+		import scipy.stats as st
+
+		interval = (2*nsig+1.)/(kernlen)
+		x = np.linspace(-nsig-interval/2., nsig+interval/2., kernlen+1)
+		kern1d = np.diff(st.norm.cdf(x))
+		kernel_raw = np.sqrt(np.outer(kern1d, kern1d))
+		kernel = kernel_raw/kernel_raw.sum()
+		return kernel
+
+	def blur_tensor(kernel, ip):
+		core = tf.cast(gkern(kernel),tf.float32)
+		filter = tf.concat(3,[tf.expand_dims(tf.concat(2,[tf.expand_dims(core,-1),tf.zeros([kernel,kernel,1]),tf.zeros([kernel,kernel,1])]),-1),
+		tf.expand_dims(tf.concat(2,[tf.zeros([kernel,kernel,1]),tf.expand_dims(core,-1),tf.zeros([kernel,kernel,1])]),-1),
+		tf.expand_dims(tf.concat(2,[tf.zeros([kernel,kernel,1]),tf.zeros([kernel,kernel,1]),tf.expand_dims(core,-1)]),-1)])
+		 
+		blur = tf.nn.conv2d(ip,tf.cast(filter,tf.float32), strides=[1,1,1,1], padding='SAME')
+		return blur
+
+
+	y_orig_ba = (y_orig_uv+blur_tensor(3,y_orig_uv)+blur_tensor(5,y_orig_uv))/3
+
 	lr = tf.Variable(0.01)
-	cross_entropy_b = tf.reduce_mean(-tf.reduce_sum((y+0.5) * tf.log(y_h +0.5 + 1e-50)))
-	cross_entropy = tf.reduce_mean( tf.pow(y - y_h,2) )
+	cross_entropy_b = tf.reduce_mean(tf.reduce_sum((y +1) * tf.log(y_h +1 + 1e-50)))
+	cross_entropy = tf.reduce_mean( tf.pow(y_orig_ba - y_h_orig_uv,2) )
 	# tf.scalar_summary("loss",-tf.reduce_sum(y * tf.log(y_h + 1e-50)))
 	optimizer = tf.train.GradientDescentOptimizer(lr)
 	tvars = tf.trainable_variables()
@@ -118,6 +144,8 @@ with tf.device('/gpu:0'):
 with tf.device('/cpu:0'):
 	import cv2
 	import numpy as np
+
+
 
 	def get_data(batch_size=5):
 		from os import listdir
@@ -151,7 +179,7 @@ with tf.device('/cpu:0'):
 	
 	train_writer = tf.train.SummaryWriter('./train',sess.graph)
 	saver = tf.train.Saver()
-	ckpt = tf.train.get_checkpoint_state('model3/')
+	ckpt = tf.train.get_checkpoint_state('model4/')
 	step = 0
 	if ckpt and ckpt.model_checkpoint_path:
 		print("Checkpoint Found ")
@@ -178,7 +206,7 @@ with tf.device('/cpu:0'):
 			loss_avg = (loss_avg*i + loss)/((i+1))
 			if i%10==0:
 				print("Loss : %f , %f , %f , step %d "%(loss, loss2, loss_avg, i))
-		saver.save(sess, 'model3/' + 'model.ckpt', global_step=step+1)
+		saver.save(sess, 'model4/' + 'model.ckpt', global_step=step+1)
 		step=step+1
 		print(y[0])
 
@@ -195,3 +223,12 @@ with tf.device('/cpu:0'):
 # r,g,b = tf.split(3,3,x_raw*255)
 # u = (128-0.168736*r -0.331364*g + 0.5*b)
 # v = 128 +.5*r - .418688*g - .081312*b
+
+def blur_tensor(kernel=5):
+	core = tf.cast(gkern(kernel),tf.float32)
+	filter = tf.concat(3,[tf.expand_dims(tf.concat(2,[tf.expand_dims(core,-1),tf.zeros([kernel,kernel,1]),tf.zeros([kernel,kernel,1])]),-1),
+	tf.expand_dims(tf.concat(2,[tf.zeros([kernel,kernel,1]),tf.expand_dims(core,-1),tf.zeros([kernel,kernel,1])]),-1),
+	tf.expand_dims(tf.concat(2,[tf.zeros([kernel,kernel,1]),tf.zeros([kernel,kernel,1]),tf.expand_dims(core,-1)]),-1)])
+	 
+	blur = tf.nn.conv2d(np.asarray(ip),tf.cast(filter,tf.float32), strides=[1,1,1,1], padding='SAME')
+	return blur
