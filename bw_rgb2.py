@@ -28,18 +28,18 @@ with tf.device('/gpu:0'):
 	def conv2d(x, W):                                                                   
 		return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')            
 	with tf.variable_scope("layer1") as scope:                                                                       
-		W_conv1 = tf.Variable(tf.truncated_normal([1, 1, 1, 512]), name="conv1w")
+		W_conv1 = tf.Variable(tf.truncated_normal([4, 4, 1, 512]), name="conv1w")
 		# tf.histogram_summary("layer1_w", W_conv1)
 		b_conv1 = tf.Variable(tf.zeros([512]), name="conv1b")                                            
 		h_conv1 = tf.nn.relu(conv2d(x_bw, W_conv1) + b_conv1, name="conv1")                            
 	with tf.variable_scope("layer2") as scope:                                                                       
-		W_conv2 = tf.Variable(tf.truncated_normal([1, 1, 512, 128]), name="conv2w")                                  
+		W_conv2 = tf.Variable(tf.truncated_normal([4, 4, 512, 128]), name="conv2w")                                  
 		# tf.histogram_summary("layer2_w", W_conv2)                                   
 		b_conv2 = tf.Variable(tf.zeros([128]), name="conv2b")                                            
 		h_conv2 = tf.nn.relu(conv2d(h_conv1, W_conv2) + b_conv2, name="conv2")                         
 
 	with tf.variable_scope("layer3") as scope:                                                                       
-		W_conv3 = tf.Variable(tf.truncated_normal([1, 1, 128, 2]), name="conv3w")                                  
+		W_conv3 = tf.Variable(tf.truncated_normal([4, 4, 128, 2]), name="conv3w")                                  
 		# tf.histogram_summary("layer2_w", W_conv2)                                   
 		b_conv3 = tf.Variable(tf.zeros([2]), name="conv2b")                                            
 		h_conv3 = tf.nn.tanh(conv2d(h_conv2, W_conv3) + b_conv3, name="conv3")                
@@ -179,7 +179,7 @@ with tf.device('/cpu:0'):
 	
 	train_writer = tf.train.SummaryWriter('./train',sess.graph)
 	saver = tf.train.Saver()
-	ckpt = tf.train.get_checkpoint_state('model4/')
+	ckpt = tf.train.get_checkpoint_state('model5/')
 	step = 0
 	if ckpt and ckpt.model_checkpoint_path:
 		print("Checkpoint Found ")
@@ -206,7 +206,7 @@ with tf.device('/cpu:0'):
 			loss_avg = (loss_avg*i + loss)/((i+1))
 			if i%10==0:
 				print("Loss : %f , %f , %f , step %d "%(loss, loss2, loss_avg, i))
-		saver.save(sess, 'model4/' + 'model.ckpt', global_step=step+1)
+		saver.save(sess, 'model5/' + 'model.ckpt', global_step=step+1)
 		step=step+1
 		print(y[0])
 
